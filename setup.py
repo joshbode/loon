@@ -11,9 +11,9 @@ setup(
     install_requires=[
         'pyserial',
     ],
-    license='LICENSE.txt',
+    license='LICENSE.rst',
     packages=find_packages(),
-    long_description=open('README.txt', 'r').read(),
+    long_description=open('README.rst', 'r').read(),
     #entry_points={
     #    'console_scripts': [
     #        'dextr = nab.dextr:main',

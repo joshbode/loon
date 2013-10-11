@@ -32,7 +32,7 @@ __all__ = [
 from xml.etree import cElementTree as ElementTree
 
 from .formatter import *
-from .exception import *
+from .exception import LoonError
 
 
 class Command(object):
@@ -40,7 +40,7 @@ class Command(object):
 
     ARGS = []
 
-    def __new__(cls, **args):
+    def __new__(cls, loon=None, **args):
         """Generate XML API command."""
 
         command = ElementTree.Element('Command')
@@ -50,13 +50,23 @@ class Command(object):
 
         args = {k.lower(): v for k, v in args.items()}
 
+        # add in default arguments
+        if loon:
+            defaults = loon.defaults
+            if defaults:
+                args = args.update((
+                    (k, v) for k, v in defaults.items()
+                    if k.lower() not in args
+                ))
+
+        # process and format arguements
         for formatter in reversed(cls.ARGS):
             try:
                 command.insert(0, formatter(args[formatter.name.lower()]))
             except KeyError:
                 if formatter.required:
                     raise TypeError(
-                        "Missing keyword argument: {0}".format(name)
+                        "Missing keyword argument: {0}".format(formatter.name)
                     )
 
         command.insert(0, name)
@@ -229,7 +239,7 @@ class confirm_message(Command):
 
     ARGS = [
         Hex('MeterMacId'),
-        Hex('Refresh', required=True, range=(0, 0xffffffff)),
+        Hex('Id', required=True, range=(0, 0xffffffff)),
     ]
 
 

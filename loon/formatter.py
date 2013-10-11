@@ -66,6 +66,9 @@ class Formatter(object):
     def convert(cls, s):
         """Convert to python object."""
 
+        if s is None:
+            return ''
+
         return unescape(s)
 
 
@@ -186,12 +189,16 @@ class Currency(Hex):
 class EnumerationMeta(type):
     """Enumeration metaclass to populate attributes."""
 
-    def __new__(cls, name, bases, dict):
+    def __new__(cls, name, bases, d):
 
-        obj = super(EnumerationMeta, cls).__new__(cls, name, bases, dict)
+        obj = super(EnumerationMeta, cls).__new__(cls, name, bases, d)
 
-        for i, level in enumerate(dict['LEVELS']):
-            setattr(obj, level, i)
+        LEVELS = d['LEVELS']
+        for i, level in enumerate(LEVELS):
+            setattr(obj, level.upper(), i)
+
+        if isinstance(LEVELS, dict):
+            obj.LEVELS = LEVELS.values()
 
         return obj
 
@@ -214,7 +221,10 @@ class Enumeration(Formatter):
     @classmethod
     def convert(cls, s):
 
-        return getattr(cls, s)
+        try:
+            return cls.LEVELS.index(s)
+        except IndexError:
+            raise LoonError("Unknown/invalid level: {0}".format(s))
 
 
 # specific enumerations
@@ -227,12 +237,19 @@ class Event(Enumeration):
 class Status(Enumeration):
     """RAVEn(TM) status."""
 
-    LEVELS = [
-        'Initializing...', 'Network',
-        'Joining', 'Join: Fail', 'Join: Success',
-        'Authenticating', 'Authenticating: Success', 'Authenticating: Fail',
-        'Connected', 'Disconnected', 'Rejoining'
-    ]
+    LEVELS = {
+        'initializing': 'Initializing...',
+        'network': 'Network',
+        'joining': 'Joining',
+        'join_fail': 'Join: Fail',
+        'join_success': 'Join: Success',
+        'authenticating': 'Authenticating',
+        'auth_success': 'Authenticating: Success',
+        'auth_fail': 'Authenticating: Fail',
+        'connected': 'Connected',
+        'disconnected': 'Disconnected',
+        'rejoining': 'Rejoining',
+    }
 
 
 class Boolean(Enumeration):
@@ -250,7 +267,10 @@ class MeterType(Enumeration):
 class Queue(Enumeration):
     """Message queue status."""
 
-    LEVELS = ['Active', 'Cancel Pending']
+    LEVELS = {
+        'active': 'Active',
+        'cancel_pending': 'Cancel Pending'
+    }
 
 
 class IntervalChannel(Enumeration):

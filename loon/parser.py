@@ -12,20 +12,25 @@ __all__ = [
 ]
 
 
+from collections import OrderedDict
+from operator import itemgetter
+from itertools import groupby
 from xml.etree import cElementTree as ElementTree
 
 from .formatter import *
-from .exception import *
+from .exception import LoonError
 
 
 class ParserMeta(type):
     """Parser metaclass to populate attributes."""
 
-    def __new__(cls, name, bases, dict):
+    def __new__(cls, name, bases, d):
 
-        obj = super(ParserMeta, cls).__new__(cls, name, bases, dict)
+        obj = super(ParserMeta, cls).__new__(cls, name, bases, d)
 
-        obj.TAGS = {tag.name: tag for tag in dict['TAGS']}
+        obj.TAGS = OrderedDict(
+            (tag.name, tag) for tag in d['TAGS']
+        )
 
         return obj
 
@@ -46,18 +51,37 @@ class Parser(object):
         except ElementTree.ParseError as e:
             logging.error("Unable to parse response: {0}".format(e))
 
-    def __new__(cls, response):
+    @staticmethod
+    def _handle_result(result, loon):
+
+        pass
+
+    def __new__(cls, response, loon=None):
         """Parse RAVEn(TM) XML API responses."""
 
         response = cls._parsexml(response)
 
-        result = {
-            x.tag: cls.TAGS.get(x.tag, Formatter).convert(x.text)
-            for x in response
-        }
-        result['Type'] = response.tag
+        def key(x, keys=cls.TAGS.keys()):
+            return keys.index(x[0])
 
-        print response
+        result = sorted([
+            (x.tag, cls.TAGS.get(x.tag, String).convert(x.text))
+            for x in response
+        ], key=key)
+
+        # collate repeated arguments into a list
+        result = OrderedDict([
+            (k, l[0] if len(l) == 1 else l)
+            for k, l in (
+                (k, list(x for _, x in v))
+                for k, v in groupby(result, key=itemgetter(0))
+            )
+        ])
+        result['response_type'] = response.tag
+
+        if loon:
+            Parser._handle_result(result, loon)
+
         return result
 
 
@@ -146,8 +170,9 @@ class MeterInfo(Parser):
     TAGS = [
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId', required=True),
-        MeterType('MeterType', required=True),
-        String('NickName', required=True),
+        #MeterType('MeterType', required=True),
+        Hex('Type', required=True),
+        String('Nickname', required=True),
         String('Account', default=''),
         String('Auth', default=''),
         String('Host', default=''),

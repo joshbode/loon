@@ -13,7 +13,6 @@ __all__ = [
 
 
 from collections import OrderedDict
-from operator import itemgetter
 from itertools import groupby
 from xml.etree import cElementTree as ElementTree
 
@@ -21,26 +20,12 @@ from .formatter import *
 from .exception import LoonError
 
 
-class ParserMeta(type):
-    """Parser metaclass to populate attributes."""
-
-    def __new__(cls, name, bases, d):
-
-        obj = super(ParserMeta, cls).__new__(cls, name, bases, d)
-
-        obj.TAGS = OrderedDict(
-            (tag.name, tag) for tag in d['TAGS']
-        )
-
-        return obj
-
-
 class Parser(object):
     """Parser for RAVEn(TM) XML API responses."""
 
-    __metaclass__ = ParserMeta
-
     TAGS = []
+
+    _result_type = OrderedDict
 
     @classmethod
     def _parsexml(cls, response):
@@ -49,38 +34,52 @@ class Parser(object):
         try:
             return ElementTree.fromstringlist(response)
         except ElementTree.ParseError as e:
-            logging.error("Unable to parse response: {0}".format(e))
+            raise LoonError(
+                "Unable to parse response: {0}".format(e)
+            )
 
-    @staticmethod
-    def _handle_result(result, loon):
-
-        pass
-
-    def __new__(cls, response, loon=None):
+    def __new__(cls, response):
         """Parse RAVEn(TM) XML API responses."""
 
         response = cls._parsexml(response)
 
-        def key(x, keys=cls.TAGS.keys()):
-            return keys.index(x[0])
+        def fix_text(text):
+            """Replace empty text with empty string."""
 
-        result = sorted([
-            (x.tag, cls.TAGS.get(x.tag, String).convert(x.text))
-            for x in response
-        ], key=key)
+            return text.strip() if text is not None else ''
 
-        # collate repeated arguments into a list
-        result = OrderedDict([
-            (k, l[0] if len(l) == 1 else l)
-            for k, l in (
-                (k, list(x for _, x in v))
-                for k, v in groupby(result, key=itemgetter(0))
+        # group up values with common tags
+        data = {
+            k: [fix_text(e.text) for e in v]
+            for k, v in groupby(
+                sorted(response, key=lambda x: x.tag),
+                key=lambda x: x.tag
             )
-        ])
-        result['response_type'] = response.tag
+        }
 
-        if loon:
-            Parser._handle_result(result, loon)
+        result = cls._result_type(response_type=response.tag)
+
+        # process tags
+        for formatter in cls.TAGS:
+            try:
+                value = formatter.parse(data.pop(formatter.name))
+            except KeyError:
+                if formatter.required:
+                    raise LoonError(
+                        "Missing value: {0}".format(formatter.name)
+                    )
+            except LoonError as e:
+                raise LoonError("Unable to process argument: {0}: {1}".format(
+                    formatter.name, e
+                ))
+            else:
+                # don't store empty results
+                if value is not None:
+                    result[formatter.name] = value
+
+        # check for unparsed data
+        if data:
+            raise LoonError("Unparsed data: {0}".format(', '.join(data)))
 
         return result
 
@@ -142,7 +141,8 @@ class ScheduleInfo(Parser):
 
     TAGS = [
         Hex('DeviceMacId', required=True),
-        Hex('MeterMacId', required=True),
+        Hex('MeterMacId',
+            required=True, missing=0xffffffffffffffff, skip=True),
         Event('Event'),
         Hex('Frequency', required=True, range=(0, 0xfffffffe)),
         Boolean('Enabled', required=True),
@@ -157,7 +157,8 @@ class MeterList(Parser):
 
     TAGS = [
         Hex('DeviceMacId', required=True),
-        Hex('MeterMacId', required=True),
+        Hex('MeterMacId',
+            required=True, sequence=True, missing=0xffffffffffffffff),
     ]
 
 
@@ -169,13 +170,14 @@ class MeterInfo(Parser):
 
     TAGS = [
         Hex('DeviceMacId', required=True),
-        Hex('MeterMacId', required=True),
+        Hex('MeterMacId',
+            required=True, missing=0xffffffffffffffff, skip=True),
         #MeterType('MeterType', required=True),
-        Hex('Type', required=True),
+        Hex('Type', required=True),  # API refers to MeterType
         String('Nickname', required=True),
-        String('Account', default=''),
-        String('Auth', default=''),
-        String('Host', default=''),
+        String('Account'),
+        String('Auth'),
+        String('Host'),
         Boolean('Enabled'),
     ]
 
@@ -256,16 +258,39 @@ class PriceCluster(Parser):
         Hex('TrailingDigits', required=True),
         Hex('Tier', required=True, range=(0, 0xff)),
         # either TierLabel or RateLabel will be present
-        String('TierLabel'), String('RateLabel'),
+        String('TierLabel', missing=''),
+        String('RateLabel', missing=''),
     ]
 
 
-class InstantaneousDemand(Parser):
+class ScaleParser(Parser):
+
+    NUMBERS = []
+
+    def _scalar(x):
+
+        return float(x) if x else 1.0
+
+    def __new__(cls, response):
+
+        result = super(ScaledParser, cls).__new__(response)
+
+        divisor = ScaleParser._scalar(result.pop('Divisor'))
+        multiplier = ScaleParser._scalar(result.pop('Multiplier'))
+
+        for number in cls.NUMBERS:
+            result[number] *= multiplier / divisor
+
+        return result
+
+
+class InstantaneousDemand(ScaleParser):
     """
     InstantaneousDemand notification provides the current consumption rate as
     recorded by the meter.
     """
 
+    NUMBERS = ['Demand']
     TAGS = [
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId', required=True),
@@ -279,12 +304,13 @@ class InstantaneousDemand(Parser):
     ]
 
 
-class CurrentSummationDelivered(Parser):
+class CurrentSummationDelivered(ScaleParser):
     """
     CurrentSummationDelivered notification provides the total consumption to
     date as recorded by the meter.
     """
 
+    NUMBERS = ['SummationDelivered', 'SummationReceived']
     TAGS = [
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId', required=True),
@@ -299,7 +325,7 @@ class CurrentSummationDelivered(Parser):
     ]
 
 
-class CurrentPeriodUsage(Parser):
+class CurrentPeriodUsage(ScaleParser):
     """
     CurrentPeriodUsage notification provides the total consumption for the
     current accumulation period, as calculated by the RAVEn(TM). The Multiplier
@@ -312,6 +338,7 @@ class CurrentPeriodUsage(Parser):
     StartDate is a UTC timestamp indicating when the current period started.
     """
 
+    NUMBERS = ['CurrentUsage']
     TAGS = [
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId', required=True),
@@ -326,7 +353,7 @@ class CurrentPeriodUsage(Parser):
     ]
 
 
-class LastPeriodUsage(Parser):
+class LastPeriodUsage(ScaleParser):
     """
     LastPeriodUsage notification provides the total consumption for the
     previous accumulation period as calculated by the RAVEn(TM). The Start Date
@@ -334,6 +361,7 @@ class LastPeriodUsage(Parser):
     define the previous period.
     """
 
+    NUMBERS = ['LastUsage']
     TAGS = [
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId', required=True),
@@ -365,7 +393,9 @@ class ProfileData(Parser):
         Hex('MeterMacId', required=True),
         Date('EndTime', required=True),
         Hex('Status', required=True, range=(0, 0x05)),
-        Integer('ProfileIntervalPeriod', required=True, range=(0, 7)),
+        IntervalPeriod('ProfileIntervalPeriod', required=True),
         Hex('NumberOfPeriodsDelivered', required=True, range=(0, 0xff)),
-        Hex('IntervalData', required=True, default=0xffffff, range=(0, 0xffffff)),
+        Hex('IntervalData',
+            required=True, missing=0xffffff, sequence=True,
+            range=(0, 0xffffff)),
     ]

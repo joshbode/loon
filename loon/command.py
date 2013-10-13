@@ -68,6 +68,10 @@ class Command(object):
                     raise TypeError(
                         "Missing keyword argument: {0}".format(formatter.name)
                     )
+            except LoonError as e:
+                raise LoonError("Unable to process argument: {0}: {1}".format(
+                    formatter.name, e
+                ))
 
         command.insert(0, name)
 

@@ -1,16 +1,10 @@
 """
-
+Loon main class.
 """
 
 # TODO
 # ----
 #
-# - attributes
-#   - per meter? nicknames for meters?
-# - fix enumerations
-#   - introduce dictionary mapping for non [a-zA-Z]\w* types
-# - attach commands on the Loon
-#   - per meter invocation?
 
 __all__ = ['Loon']
 
@@ -25,20 +19,24 @@ from functools import partial
 
 from .command import *
 from .parser import *
+from .exception import LoonError
 
 
 class LoonMeta(type):
-    """Loon metaclass to populate parsers."""
+    """Loon meta-class to populate parsers and commands."""
 
     def __new__(cls, name, bases, dict):
 
         obj = super(LoonMeta, cls).__new__(cls, name, bases, dict)
 
+        # register parsers on class
         obj.PARSERS = {cls.__name__: cls for cls in dict['PARSERS']}
 
+        # add methods for commands to class
         for command in dict['COMMANDS']:
             def command_method(self, command=command, **args):
-                return self._serial.write(command(self, **args))
+                self._serial.write(command(self, **args))
+            command_method.__doc__ = command.__doc__
 
             setattr(obj, command.__name__, command_method)
 
@@ -87,13 +85,14 @@ class Loon(object):
         get_profile_data
     ]
 
-    def __init__(self, device, maxlen=10e3):
+    def __init__(self, device, queue=None):
+        """Initialise the Loon."""
 
         self._serial = Serial(device, timeout=5)
 
         self._defaults = {}
 
-        self.responses = deque(maxlen=maxlen)
+        self.responses = queue if queue else deque()
 
         self._thread = Thread(target=self._get_responses)
         self._thread.daemon = True
@@ -101,15 +100,11 @@ class Loon(object):
 
     def _get_line(self):
 
-        return self._serial.readline().rstrip()
-
-    def clear_responses(self):
-
-        self.responses.clear()
+        return self._serial.readline().lstrip('\0').rstrip()
 
     def set_default(self, arg, value=None):
 
-        if value:
+        if value is not None:
             self._defaults[arg] = value
         else:
             del self._defaults[arg]
@@ -134,13 +129,16 @@ class Loon(object):
                     tag = line.replace('<', '').replace('>', '')
                     break
 
+                if line:
+                    logging.warn("Unexpected line found: {0!r}".format(line))
+
             # get lines until closing tag
             while True:
                 line = self._get_line()
 
                 # timed-out
                 if not line:
-                    logging.warn("Timed out waiting for line.")
+                    logging.warn("Timed out waiting for next line.")
                     continue
 
                 response.append(line)
@@ -148,15 +146,19 @@ class Loon(object):
                 if line.startswith('</'):
                     break
 
+            # get the parser for the response-type
             try:
                 parser = self.PARSERS[tag]
             except KeyError as e:
                 logging.warn("Unhandled response type: {0}".format(e))
 
+            # parse the response
             try:
-                response = parser(response, self)
-            except TypeError as e:
+                response = parser(response)
+            except LoonError as e:
                 logging.error("Invalid response data: {0}".format(e))
+            except SkipSignal as e:
+                logging.debug("Skipped response: {0}: {1}".format(tag, e))
             else:
-                self.responses.append(response)
                 logging.debug("Captured response: {0}".format(tag))
+                self.responses.append(response)

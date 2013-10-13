@@ -3,9 +3,10 @@ RAVEn(TM) API data formats.
 """
 
 __all__ = [
-    'Formatter',
+    'Formatter', 'SkipSignal',
     'String', 'Integer', 'Decimal', 'Hex', 'Date', 'Currency', 'Enumeration',
-    'Event', 'Status', 'Boolean', 'MeterType', 'Queue', 'IntervalChannel',
+    'Event', 'Status', 'Boolean', 'MeterType', 'Queue',
+    'IntervalChannel', 'IntervalPeriod'
 ]
 
 import os.path
@@ -13,14 +14,24 @@ import datetime
 import calendar
 import decimal
 
-from cgi import escape
+from collections import OrderedDict
+
+from cgi import escape as cgi_escape
 from HTMLParser import HTMLParser
+
 from xml.etree import cElementTree as ElementTree
 
 from .exception import LoonError
 
 unescape = HTMLParser().unescape
-encoding = 'cp1252'
+api_encoding = 'cp1252'
+
+
+def escape(x, encoding=api_encoding):
+    """Escape string for HTML."""
+
+    return cgi_escape(unicode(x)).encode(encoding, 'xmlcharrefreplace')
+
 
 # load currencies (ISO 4217)
 currencies = ElementTree.parse(
@@ -38,38 +49,68 @@ currency_number = {
 }
 
 
+class SkipSignal(Exception):
+    """Skip the rest of the response."""
+
+    pass
+
+
 class Formatter(object):
     """RAVEn(TM) XML API argument formatter."""
 
-    def __init__(self, name, required=False, default=None):
+    def __init__(self, name, required=False, missing=None, skip=False,
+                 sequence=False):
         """Initialise formatter."""
+
+        if required and missing and not (skip or sequence):
+            raise TypeError("Value cannot be both required and missing.")
+
+        if skip and missing is None:
+            raise TypeError("Cannot skip response without missing value.")
 
         self.name = name
         self.required = required
-        self.default = default
+        self.missing = missing
+        self.skip = skip
+        self.sequence = sequence
 
-    def __call__(self, text):
-        """Create conformant XML API element."""
+    def __call__(self, value):
+        """Create XML API element."""
 
         element = ElementTree.Element(self.name)
-        element.text = self.to(text)
+        element.text = self.encode(value)
 
         return element
 
+    def parse(self, value):
+        """Parse XML API value."""
+
+        if not self.sequence and len(value) > 1:
+            raise LoonError("Sequence not allowed.")
+
+        # process data and remove missing values
+        result = [self._parse(v) for v in value]
+        result = [x for x in result if x != self.missing]
+
+        # handle unrequired missing data
+        if not result and not (self.sequence and self.required):
+            if self.skip:
+                raise SkipSignal("Missing {0}".format(self.name))
+            else:
+                return None
+
+        return result if self.sequence else result[0]
+
     @classmethod
-    def to(cls, obj):
-        """Convert to XML API format."""
+    def encode(cls, obj):
+        """Convert object to XML API format."""
 
-        return escape(unicode(obj)).encode(encoding, 'xmlcharrefreplace')
+        return escape(obj)
 
-    @classmethod
-    def convert(cls, s):
-        """Convert to python object."""
+    def _parse(self, value):
+        """Convert XML API value to object."""
 
-        if s is None:
-            return ''
-
-        return unescape(s)
+        return unescape(value)
 
 
 class String(Formatter):
@@ -81,14 +122,15 @@ class String(Formatter):
 class Integer(Formatter):
     """Format integer for API."""
 
-    def __init__(self, name, required=False, default=None,
-                 range=(0, 0xffffffff)):
+    def __init__(self, name, required=False, missing=None, skip=False,
+                 sequence=False, range=(0, 0xffffffff)):
 
-        super(Integer, self).__init__(name, required, default)
+        super(Integer, self).__init__(name, required, missing, skip, sequence)
 
         self.min, self.max = range
 
-    def to(self, obj):
+    def encode(self, obj):
+        """Convert object to XML API format."""
 
         if self.min <= obj <= self.max:
             return "{0:d}".format(obj)
@@ -97,37 +139,39 @@ class Integer(Formatter):
                 "Value is outside allowable range: {0}".format(obj)
             )
 
-    @classmethod
-    def convert(cls, s):
+    def _parse(self, value):
+        """Convert XML API value to object."""
 
-        return int(s)
+        return int(value)
 
 
 class Decimal(Formatter):
     """Decimal format."""
 
     @classmethod
-    def to(cls, obj):
+    def encode(cls, obj):
+        """Convert object to XML API format."""
 
         return "{0:.5f}".format(obj)
 
-    @classmethod
-    def convert(cls, s):
+    def _parse(self, value):
+        """Convert XML API value to object."""
 
-        return decimal.Decimal(s)
+        return decimal.Decimal(value)
 
 
 class Hex(Formatter):
     """Hex format, with optional range."""
 
-    def __init__(self, name, required=False, default=None,
-                 range=(0, 0xffffffffffffffff)):
+    def __init__(self, name, required=False, missing=None, skip=False,
+                 sequence=False, range=(0, 0xffffffffffffffff)):
 
-        super(Hex, self).__init__(name, required, default)
+        super(Hex, self).__init__(name, required, missing, skip, sequence)
 
         self.min, self.max = range
 
-    def to(self, obj):
+    def encode(self, obj):
+        """Convert object to XML API format."""
 
         if self.min <= obj <= self.max:
             return hex(obj)
@@ -136,54 +180,77 @@ class Hex(Formatter):
                 "Value is outside allowable range: {0}".format(obj)
             )
 
-    @classmethod
-    def convert(cls, s):
+    def _parse(self, value):
+        """Convert XML API value to object."""
 
-        return int(s, base=16)
+        return int(value, base=16)
 
 
 class Date(Hex):
     """Date format, in local or UTC."""
 
-    def __init__(self, name, required=False, default=None):
+    def __init__(self, name, required=False, missing=None, skip=False,
+                 sequence=False):
 
         super(Date, self).__init__(
-            name, required, default, range=(0, 0xffffffff)
+            name, required, missing, skip, sequence, range=(0, 0xffffffff)
         )
 
-    def to(self, obj):
+    def encode(self, obj):
+        """Convert object to XML API format."""
 
         return super(Date, self).to(calendar.timegm(obj.utctimetuple()))
 
-    @classmethod
-    def convert(cls, s):
+    def _parse(self, value):
+        """Convert XML API value to object."""
 
-        return datetime.datetime.utcfromtimestamp(super(Date, cls).convert(s))
+        return datetime.datetime.utcfromtimestamp(
+            super(Date, self).convert(value)
+        )
 
 
 class Currency(Hex):
     """Currency format."""
 
-    def __init__(self, name, required=False, default=None):
+    def __init__(self, name, required=False, missing=None, skip=False,
+                 sequence=False):
 
         super(Currency, self).__init__(
-            name, required, default, range=(0, 0xffffffff)
+            name, required, missing, skip, sequence, range=(0, 0xffffffff)
         )
 
-    def to(self, obj):
+    def encode(self, obj):
+        """Convert object to XML API format."""
 
         try:
             return super(Currency, self).to(currency_number[obj])
         except KeyError:
             raise LoonError("Unknown currency code: {0}".format(obj))
 
-    @classmethod
-    def convert(cls, s):
+    def _parse(self, value):
+        """Convert XML API value to object."""
 
         try:
-            return currency_code[super(Currency, cls).convert(s)]
+            return currency_code[super(Currency, self).convert(value)]
         except KeyError:
-            raise LoonError("Unknown currency number: {0}".format(s))
+            raise LoonError("Unknown currency number: {0}".format(value))
+
+
+class Boolean(Formatter):
+    """Boolean format."""
+
+    _MAP = {'N': False, 'Y': True}
+
+    @classmethod
+    def encode(cls, obj):
+        """Convert object to XML API format."""
+
+        return 'Y' if obj else 'N'
+
+    def _parse(self, value):
+        """Convert XML API value to object."""
+
+        return Boolean._MAP[value]
 
 
 class EnumerationMeta(type):
@@ -193,12 +260,13 @@ class EnumerationMeta(type):
 
         obj = super(EnumerationMeta, cls).__new__(cls, name, bases, d)
 
-        LEVELS = d['LEVELS']
-        for i, level in enumerate(LEVELS):
-            setattr(obj, level.upper(), i)
+        obj.LEVELS = OrderedDict(
+            (x, x) if isinstance(x, basestring) else x
+            for x in d['LEVELS']
+        )
 
-        if isinstance(LEVELS, dict):
-            obj.LEVELS = LEVELS.values()
+        for i, level in enumerate(obj.LEVELS, 1):
+            setattr(obj, level.upper(), i)
 
         return obj
 
@@ -211,69 +279,105 @@ class Enumeration(Formatter):
     LEVELS = []
 
     @classmethod
-    def to(cls, obj):
+    def encode(cls, obj):
+        """Convert object to XML API format."""
 
         try:
             return cls.LEVELS[obj]
-        except (IndexError, TypeError):
+        except KeyError:
             raise LoonError("Unknown/invalid level: {0}".format(obj))
 
-    @classmethod
-    def convert(cls, s):
+    def _parse(self, value):
+        """Convert XML API value to object."""
 
         try:
-            return cls.LEVELS.index(s)
+            return self.LEVELS.values().index(value)
         except IndexError:
-            raise LoonError("Unknown/invalid level: {0}".format(s))
+            raise LoonError("Unknown/invalid level: {0}".format(value))
 
 
 # specific enumerations
 class Event(Enumeration):
     """Scheduled event."""
 
-    LEVELS = ['time', 'price', 'demand', 'summation', 'message']
+    LEVELS = [
+        'time', 'price', 'demand', 'summation', 'message',
+        # following not mentioned in API documentation
+        'scheduled_prices', 'profile_data'
+    ]
 
 
 class Status(Enumeration):
     """RAVEn(TM) status."""
 
-    LEVELS = {
-        'initializing': 'Initializing...',
-        'network': 'Network',
-        'joining': 'Joining',
-        'join_fail': 'Join: Fail',
-        'join_success': 'Join: Success',
-        'authenticating': 'Authenticating',
-        'auth_success': 'Authenticating: Success',
-        'auth_fail': 'Authenticating: Fail',
-        'connected': 'Connected',
-        'disconnected': 'Disconnected',
-        'rejoining': 'Rejoining',
-    }
-
-
-class Boolean(Enumeration):
-    """Boolean."""
-
-    LEVELS = ['Y', 'N']
+    LEVELS = [
+        ('initializing', "Initializing..."),
+        ('network', "Network"),
+        ('joining', "Joining"),
+        ('join_fail', "Join: Fail"),
+        ('join_success', "Join: Success"),
+        ('authenticating', "Authenticating"),
+        ('auth_success', "Authenticating: Success"),
+        ('auth_fail', "Authenticating: Fail"),
+        ('connected', "Connected"),
+        ('disconnected', "Disconnected"),
+        ('rejoining', "Rejoining")
+    ]
 
 
 class MeterType(Enumeration):
     """Smart meter type."""
 
+    # seems to be different to API?
     LEVELS = ['electric', 'gas', 'water', 'other']
 
 
 class Queue(Enumeration):
     """Message queue status."""
 
-    LEVELS = {
-        'active': 'Active',
-        'cancel_pending': 'Cancel Pending'
-    }
+    LEVELS = [
+        ('active', "Active"),
+        ('cancel_pending', "Cancel Pending")
+    ]
 
 
 class IntervalChannel(Enumeration):
     """Interval channel."""
 
-    LEVELS = ['Delivered', 'Received']
+    LEVELS = [
+        ('delivered', 'Delivered'),
+        ('received', 'Received')
+    ]
+
+
+class IntervalPeriod(Formatter):
+    """Interval period."""
+
+    INTERVALS = OrderedDict([
+        (86400, "Daily"),
+        (3600, "60 minutes"),
+        (1800, "30 minutes"),
+        (900, "15 minutes"),
+        (600, "10 minutes"),
+        (450, "7.5 minutes"),
+        (300, "5 minutes"),
+        (150, "2.5 minutes"),
+    ])
+
+    @classmethod
+    def encode(cls, obj):
+        """Convert object to XML API format."""
+
+        try:
+            return str(IntervalPeriod.INTERVALS.index(int(obj)))
+        except IndexError:
+            raise LoonError("Unknown/invalid interval: {0}".format(obj))
+
+    @staticmethod
+    def _parse(value):
+        """Convert XML API value to object."""
+
+        try:
+            return IntervalPeriod.INTERVALS.keys()[int(value)]
+        except IndexError:
+            raise LoonError("Unknown/invalid interval: {0}".format(value))

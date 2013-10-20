@@ -3,8 +3,9 @@ Loon main class.
 """
 
 # TODO
-# ----
-#
+# - testing
+# - alternative results stores
+# - client/server
 
 __all__ = ['Loon']
 
@@ -12,14 +13,15 @@ import time
 import types
 import logging
 
-from serial import Serial
-from threading import Thread
+import serial
+from threading import Thread, Event
 from collections import deque
 from functools import partial
 
 from .command import *
 from .parser import *
 from .exception import LoonError
+from formatter import SkipSignal
 
 
 class LoonMeta(type):
@@ -85,22 +87,42 @@ class Loon(object):
         get_profile_data
     ]
 
-    def __init__(self, device, queue=None):
+    def __init__(self, device, start_capture=True, queue=None):
         """Initialise the Loon."""
 
-        self._serial = Serial(device, timeout=5)
+        self._serial = serial.Serial(
+            device, baudrate=115200, bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE,
+            timeout=None
+        )
 
         self._defaults = {}
 
         self.responses = queue if queue else deque()
 
-        self._thread = Thread(target=self._get_responses)
-        self._thread.daemon = True
-        self._thread.start()
+        self._thread = None
+        self._stop = Event()
+
+        if start_capture:
+            self.start_capture()
 
     def _get_line(self):
 
-        return self._serial.readline().lstrip('\0').rstrip()
+        line = self._serial.readline()
+
+        return line.lstrip('\0').rstrip()
+
+    def start_capture(self):
+
+        if not (self._thread and self._thread.is_alive()):
+            self._stop.clear()
+            self._thread = Thread(target=self._get_responses)
+            self._thread.daemon = True
+            self._thread.start()
+
+    def stop_capture(self):
+
+        self._stop.set()
 
     def set_default(self, arg, value=None):
 
@@ -117,7 +139,7 @@ class Loon(object):
 
     def _get_responses(self):
 
-        while True:
+        while not self._stop.is_set():
             response = []
 
             # chew lines until a start tag is found
@@ -138,7 +160,10 @@ class Loon(object):
 
                 # timed-out
                 if not line:
-                    logging.warn("Timed out waiting for next line.")
+                    logging.warn(
+                        "Timed out waiting for next line or did not receive a "
+                        "response."
+                    )
                     continue
 
                 response.append(line)
@@ -160,5 +185,5 @@ class Loon(object):
             except SkipSignal as e:
                 logging.debug("Skipped response: {0}: {1}".format(tag, e))
             else:
-                logging.debug("Captured response: {0}".format(tag))
+                logging.debug("Captured response: {0}".format(response))
                 self.responses.append(response)

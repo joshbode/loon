@@ -189,6 +189,10 @@ class Hex(Formatter):
 class Date(Hex):
     """Date format, in local or UTC."""
 
+    _offset = calendar.timegm(
+        datetime.datetime(2000, 1, 1).utctimetuple()
+    )
+
     def __init__(self, name, required=False, missing=None, skip=False,
                  sequence=False):
 
@@ -199,13 +203,15 @@ class Date(Hex):
     def encode(self, obj):
         """Convert object to XML API format."""
 
-        return super(Date, self).to(calendar.timegm(obj.utctimetuple()))
+        return super(Date, self).encode(
+            calendar.timegm(obj.utctimetuple()) - Date._offset
+        )
 
     def _parse(self, value):
         """Convert XML API value to object."""
 
         return datetime.datetime.utcfromtimestamp(
-            super(Date, self).convert(value)
+            super(Date, self)._parse(value) + Date._offset
         )
 
 
@@ -223,7 +229,7 @@ class Currency(Hex):
         """Convert object to XML API format."""
 
         try:
-            return super(Currency, self).to(currency_number[obj])
+            return super(Currency, self).encode(currency_number[obj])
         except KeyError:
             raise LoonError("Unknown currency code: {0}".format(obj))
 
@@ -231,7 +237,7 @@ class Currency(Hex):
         """Convert XML API value to object."""
 
         try:
-            return currency_code[super(Currency, self).convert(value)]
+            return currency_code[super(Currency, self)._parse(value)]
         except KeyError:
             raise LoonError("Unknown currency number: {0}".format(value))
 

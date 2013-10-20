@@ -15,6 +15,7 @@ __all__ = [
 from collections import OrderedDict
 from itertools import groupby
 from xml.etree import cElementTree as ElementTree
+from xml.etree.ElementTree import ParseError
 
 from .formatter import *
 from .exception import LoonError
@@ -33,7 +34,7 @@ class Parser(object):
         # parse XML into ElementTree element
         try:
             return ElementTree.fromstringlist(response)
-        except ElementTree.ParseError as e:
+        except ParseError as e:
             raise LoonError(
                 "Unable to parse response: {0}".format(e)
             )
@@ -267,13 +268,14 @@ class ScaleParser(Parser):
 
     NUMBERS = []
 
+    @staticmethod
     def _scalar(x):
 
         return float(x) if x else 1.0
 
     def __new__(cls, response):
 
-        result = super(ScaledParser, cls).__new__(response)
+        result = super(ScaleParser, cls).__new__(cls, response)
 
         divisor = ScaleParser._scalar(result.pop('Divisor'))
         multiplier = ScaleParser._scalar(result.pop('Multiplier'))

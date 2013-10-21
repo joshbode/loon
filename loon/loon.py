@@ -26,6 +26,10 @@ from .exception import LoonError
 from formatter import SkipSignal
 
 
+start_re = re.compile(r'^<(\w+)>$')
+end_re = re.compile(r'^</(\w+)>$')
+
+
 class LoonMeta(type):
     """Loon meta-class to populate parsers and commands."""
 
@@ -148,51 +152,48 @@ class Loon(object):
 
         #self.initialize()
 
+        response = []
         while not self._stop.is_set():
-            response = []
 
-            # chew lines until a start tag is found
-            while True:
-                line = self._get_line()
+            line = self._get_line()
 
-                if line.startswith('<') and not line.startswith('</'):
-                    response.append(line)
-                    tag = line.replace('<', '').replace('>', '')
-                    break
+            split_line = line.split('<')
+            head, tail = '<'.join(split_line[:-1]), '<' + split_line[-1]
+            match = start_re.match(tail)
 
-                if line:
-                    logging.warn("Unexpected line found: {0!r}".format(line))
-
-            # get lines until closing tag
-            while True:
-                line = self._get_line()
-
-                # timed-out
-                if not line:
+            if match:
+                tag = match.groups()[0]
+                if head:
+                    response.append(head)
+                if response:
+                    response = '\n'.join(response)
                     logging.warn(
-                        "Timed out waiting for next line or did not receive a "
-                        "response."
+                        "Discarding truncated response: {0!r}".format(
+                            response
+                        )
                     )
-                    continue
-
+                response = [tail]
+            else:
                 response.append(line)
 
-                if line.startswith('</'):
-                    break
+            if end_re.match(line):
+                # get the parser for the response-type
+                try:
+                    parser = self.PARSERS[tag]
+                except KeyError as e:
+                    logging.warn("Unhandled response type: {0}".format(e))
+                    response = []
+                    continue
 
-            # get the parser for the response-type
-            try:
-                parser = self.PARSERS[tag]
-            except KeyError as e:
-                logging.warn("Unhandled response type: {0}".format(e))
-
-            # parse the response
-            try:
-                response = parser(response)
-            except LoonError as e:
-                logging.error("Invalid response data: {0}".format(e))
-            except SkipSignal as e:
-                logging.debug("Skipped response: {0}: {1}".format(tag, e))
-            else:
-                logging.debug("Captured response: {0}".format(response))
-                self.responses.append(response)
+                # parse the response
+                try:
+                    response = parser(response)
+                except LoonError as e:
+                    logging.error("Invalid response data: {0}".format(e))
+                except SkipSignal as e:
+                    logging.debug("Skipped response: {0}: {1}".format(tag, e))
+                else:
+                    logging.debug("Captured response: {0}".format(response))
+                    self.responses.append(response)
+                finally:
+                    response = []

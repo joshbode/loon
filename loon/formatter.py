@@ -62,7 +62,7 @@ class Formatter(object):
                  sequence=False):
         """Initialise formatter."""
 
-        if required and missing and not (skip or sequence):
+        if required and missing is not None and not (skip or sequence):
             raise TypeError("Value cannot be both required and missing.")
 
         if skip and missing is None:
@@ -89,8 +89,8 @@ class Formatter(object):
             raise LoonError("Sequence not allowed.")
 
         # process data and remove missing values
-        result = [self._parse(v) for v in value]
-        result = [x for x in result if x != self.missing]
+        result = [x for x in value if x != self.missing]
+        result = [self._parse(x) for x in result]
 
         # handle unrequired missing data
         if not result and not (self.sequence and self.required):
@@ -125,9 +125,9 @@ class Integer(Formatter):
     def __init__(self, name, required=False, missing=None, skip=False,
                  sequence=False, range=(0, 0xffffffff)):
 
-        super(Integer, self).__init__(name, required, missing, skip, sequence)
-
         self.min, self.max = range
+
+        super(Integer, self).__init__(name, required, missing, skip, sequence)
 
     def encode(self, obj):
         """Convert object to XML API format."""
@@ -166,15 +166,15 @@ class Hex(Formatter):
     def __init__(self, name, required=False, missing=None, skip=False,
                  sequence=False, range=(0, 0xffffffffffffffff)):
 
-        super(Hex, self).__init__(name, required, missing, skip, sequence)
-
         self.min, self.max = range
+
+        super(Hex, self).__init__(name, required, missing, skip, sequence)
 
     def encode(self, obj):
         """Convert object to XML API format."""
 
         if self.min <= obj <= self.max:
-            return hex(obj)
+            return '0x{0:X}'.format(obj)
         else:
             raise LoonError(
                 "Value is outside allowable range: {0}".format(obj)
@@ -189,7 +189,7 @@ class Hex(Formatter):
 class Date(Hex):
     """Date format, in local or UTC."""
 
-    _offset = calendar.timegm(
+    EPOCH = calendar.timegm(
         datetime.datetime(2000, 1, 1).utctimetuple()
     )
 
@@ -204,14 +204,14 @@ class Date(Hex):
         """Convert object to XML API format."""
 
         return super(Date, self).encode(
-            calendar.timegm(obj.utctimetuple()) - Date._offset
+            calendar.timegm(obj.utctimetuple()) - Date.EPOCH
         )
 
     def _parse(self, value):
         """Convert XML API value to object."""
 
         return datetime.datetime.utcfromtimestamp(
-            super(Date, self)._parse(value) + Date._offset
+            super(Date, self)._parse(value) + Date.EPOCH
         )
 
 
@@ -335,7 +335,12 @@ class MeterType(Enumeration):
     """Smart meter type."""
 
     # seems to be different to API?
-    LEVELS = ['electric', 'gas', 'water', 'other']
+    LEVELS = [
+        'electric': '0x0000',
+        'gas': '0x0001',
+        'water': '0x0002',
+        'other': '0x0003',
+    ]
 
 
 class Queue(Enumeration):

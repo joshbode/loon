@@ -12,6 +12,7 @@ __all__ = [
 ]
 
 
+from datetime import datetime
 from collections import OrderedDict
 from itertools import groupby
 from xml.etree import cElementTree as ElementTree
@@ -31,6 +32,7 @@ class Parser(object):
     @classmethod
     def _parsexml(cls, response):
 
+        print '\n'.join(response)
         # parse XML into ElementTree element
         try:
             return ElementTree.fromstringlist(response)
@@ -143,7 +145,8 @@ class ScheduleInfo(Parser):
     TAGS = [
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId',
-            required=True, missing=0xffffffffffffffff, skip=True),
+            required=True, missing='0xffffffffffffffff', skip=True),
+        String('Mode', required=True),  # not in API
         Event('Event'),
         Hex('Frequency', required=True, range=(0, 0xfffffffe)),
         Boolean('Enabled', required=True),
@@ -159,7 +162,7 @@ class MeterList(Parser):
     TAGS = [
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId',
-            required=True, sequence=True, missing=0xffffffffffffffff),
+            required=True, sequence=True, missing='0xffffffffffffffff'),
     ]
 
 
@@ -172,7 +175,7 @@ class MeterInfo(Parser):
     TAGS = [
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId',
-            required=True, missing=0xffffffffffffffff, skip=True),
+            required=True, missing='0xffffffffffffffff', skip=True),
         #MeterType('MeterType', required=True),
         Hex('Type', required=True),  # API refers to MeterType
         String('Nickname', required=True),
@@ -229,8 +232,10 @@ class MessageCluster(Parser):
     TAGS = [
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId', required=True),
-        Date('TimeStamp', required=True),
+        Date('TimeStamp', required=True, missing='', skip=True),
+        String('TimeStamp', required=True),
         Hex('Id', required=True, range=(0, 0xffffffff)),
+        String('Id', required=True),
         String('Text', required=True),
         Boolean('ConfirmationRequired', required=True),
         Boolean('Confirmed', required=True),
@@ -398,6 +403,6 @@ class ProfileData(Parser):
         IntervalPeriod('ProfileIntervalPeriod', required=True),
         Hex('NumberOfPeriodsDelivered', required=True, range=(0, 0xff)),
         Hex('IntervalData',
-            required=True, missing=0xffffff, sequence=True,
+            required=True, missing='0xffffff', sequence=True,
             range=(0, 0xffffff)),
     ]

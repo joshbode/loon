@@ -3,12 +3,14 @@ Loon main class.
 """
 
 # TODO
+# - Clear line buffer if new tag starts in middle of existing message
 # - testing
 # - alternative results stores
 # - client/server
 
 __all__ = ['Loon']
 
+import re
 import time
 import types
 import logging
@@ -61,7 +63,7 @@ class Loon(object):
     ]
 
     COMMANDS = [
-        initialize,
+        initialize,  # command seems to not work
         restart,
         factory_reset,
         get_connection_status,
@@ -114,7 +116,7 @@ class Loon(object):
 
     def start_capture(self):
 
-        if not (self._thread and self._thread.is_alive()):
+        if not self.capturing:
             self._stop.clear()
             self._thread = Thread(target=self._get_responses)
             self._thread.daemon = True
@@ -123,6 +125,11 @@ class Loon(object):
     def stop_capture(self):
 
         self._stop.set()
+
+    @property
+    def capturing(self):
+
+        return self._thread and self._thread.is_alive()
 
     def set_default(self, arg, value=None):
 
@@ -138,6 +145,8 @@ class Loon(object):
     defaults = property(**defaults())
 
     def _get_responses(self):
+
+        self.initialize()
 
         while not self._stop.is_set():
             response = []

@@ -334,12 +334,12 @@ class Status(Enumeration):
 class MeterType(Enumeration):
     """Smart meter type."""
 
-    # seems to be different to API?
+    # seems to be different to API
     LEVELS = [
-        'electric': '0x0000',
-        'gas': '0x0001',
-        'water': '0x0002',
-        'other': '0x0003',
+        ('electric', '0x0000'),
+        #('gas', '0x0001'),
+        #('water', '0x0002'),
+        #('other', '0x0003'),
     ]
 
 

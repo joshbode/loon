@@ -32,7 +32,6 @@ class Parser(object):
     @classmethod
     def _parsexml(cls, response):
 
-        print '\n'.join(response)
         # parse XML into ElementTree element
         try:
             return ElementTree.fromstringlist(response)

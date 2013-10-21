@@ -146,7 +146,7 @@ class Loon(object):
 
     def _get_responses(self):
 
-        self.initialize()
+        #self.initialize()
 
         while not self._stop.is_set():
             response = []

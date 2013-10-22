@@ -8,7 +8,7 @@ __all__ = [
     'TimeCluster', 'MessageCluster', 'PriceCluster',
     'InstantaneousDemand', 'CurrentSummationDelivered',
     'CurrentPeriodUsage', 'LastPeriodUsage',
-    'ProfileData', 'Warning',
+    'ProfileData', 'Warning', 'Error',
 ]
 
 
@@ -88,7 +88,17 @@ class Parser(object):
 
 class Warning(Parser):
     """
-    Warning from RAVEn(TM) when command has not been understood.
+    Warning from RAVEn(TM).
+    """
+
+    TAGS = [
+        String('Text', required=True),
+    ]
+
+
+class Error(Parser):
+    """
+    Error from RAVEn(TM).
     """
 
     TAGS = [

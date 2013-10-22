@@ -26,8 +26,8 @@ from .exception import LoonError
 from formatter import SkipSignal
 
 
-start_re = re.compile(r'^<(\w+)>$')
-end_re = re.compile(r'^</(\w+)>$')
+start_re = re.compile(r'^<([a-zA-Z]+)>$')
+end_re = re.compile(r'^</([a-zA-Z]+)>$')
 
 
 class LoonMeta(type):
@@ -153,31 +153,30 @@ class Loon(object):
         #self.initialize()
 
         response = []
+
         while not self._stop.is_set():
 
             line = self._get_line()
 
+            # look for truncated responses
             split_line = line.split('<')
             head, tail = '<'.join(split_line[:-1]), '<' + split_line[-1]
-            match = start_re.match(tail)
 
-            if match:
-                tag = match.groups()[0]
+            start = start_re.match(tail)
+            end = end_re.match(head or tail)
+
+            if start:
+                # potentially (and probably) truncated line
                 if head:
                     response.append(head)
-                if response:
-                    response = '\n'.join(response)
-                    logging.warn(
-                        "Discarding truncated response: {0!r}".format(
-                            response
-                        )
-                    )
-                response = [tail]
             else:
                 response.append(line)
 
-            if end_re.match(line):
+            if end:
+
                 # get the parser for the response-type
+                tag = end.group(1)
+
                 try:
                     parser = self.PARSERS[tag]
                 except KeyError as e:
@@ -197,3 +196,17 @@ class Loon(object):
                     self.responses.append(response)
                 finally:
                     response = []
+
+            if start:
+                if response:
+                    logging.warn(
+                        "Discarding truncated response: {0!r}".format(
+                            '\n'.join(response)
+                        )
+                    )
+                response = [tail]
+
+    def __del__(self):
+
+        self.stop_capture()
+        self._serial.close()

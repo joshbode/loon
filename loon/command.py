@@ -367,6 +367,6 @@ class get_profile_data(Command):
     ARGS = [
         Hex('MeterMacId'),
         Hex('NumberOfPeriods', required=True, range=(0, 12)),
-        Hex('EndTime', required=True, range=(0, 0xFFFFFFFF)),
+        Date('EndTime', required=True),
         IntervalChannel('IntervalChannel', required=True),
     ]

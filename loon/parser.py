@@ -175,8 +175,7 @@ class MeterInfo(Parser):
         Hex('DeviceMacId', required=True),
         Hex('MeterMacId',
             required=True, missing='0xffffffffffffffff', skip=True),
-        #MeterType('MeterType', required=True),
-        Hex('Type', required=True),  # API refers to MeterType
+        MeterType('Type', required=True),  # API refers to MeterType
         String('Nickname', required=True),
         String('Account'),
         String('Auth'),

@@ -174,7 +174,7 @@ class Hex(Formatter):
         """Convert object to XML API format."""
 
         if self.min <= obj <= self.max:
-            return '0x{0:X}'.format(obj)
+            return hex(obj)
         else:
             raise LoonError(
                 "Value is outside allowable range: {0}".format(obj)
@@ -271,7 +271,7 @@ class EnumerationMeta(type):
             for x in d['LEVELS']
         )
 
-        for i, level in enumerate(obj.LEVELS, 1):
+        for i, level in enumerate(obj.LEVELS):
             setattr(obj, level.upper(), i)
 
         return obj
@@ -289,8 +289,11 @@ class Enumeration(Formatter):
         """Convert object to XML API format."""
 
         try:
-            return cls.LEVELS[obj]
-        except KeyError:
+            if isinstance(obj, (int, long)):
+                return cls.LEVELS.values()[obj]
+            else:
+                return cls.LEVELS[obj]
+        except (IndexError, KeyError):
             raise LoonError("Unknown/invalid level: {0}".format(obj))
 
     def _parse(self, value):
@@ -334,12 +337,15 @@ class Status(Enumeration):
 class MeterType(Enumeration):
     """Smart meter type."""
 
-    # seems to be different to API
+    # Zigbee Smart Energy specification, page 184
     LEVELS = [
         ('electric', '0x0000'),
-        #('gas', '0x0001'),
-        #('water', '0x0002'),
-        #('other', '0x0003'),
+        ('gas', '0x0001'),
+        ('water', '0x0002'),
+        ('thermal', '0x0003'),
+        ('pressure', '0x0004'),
+        ('heat', '0x0005'),
+        ('cooling', '0x0006'),
     ]
 
 

@@ -6,7 +6,8 @@ __all__ = [
     'Formatter', 'SkipSignal',
     'String', 'Integer', 'Decimal', 'Hex', 'Date', 'Currency', 'Enumeration',
     'Event', 'Status', 'Boolean', 'MeterType', 'Queue',
-    'IntervalChannel', 'IntervalPeriod'
+    'IntervalChannel', 'IntervalPeriod',
+    'indent',
 ]
 
 import os.path
@@ -31,6 +32,25 @@ def escape(x, encoding=api_encoding):
     """Escape string for HTML."""
 
     return cgi_escape(unicode(x)).encode(encoding, 'xmlcharrefreplace')
+
+
+def indent(elem, level=0, shift=2):
+    """Indent ElementTree in-place."""
+
+    i = '\n' + ' ' * level * shift
+
+    if len(elem):
+        if not elem.text or not elem.text.strip():
+            elem.text = i + ' ' * shift
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+        for elem in elem:
+            indent(elem, level + 1, shift)
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = i
+    else:
+        if level and (not elem.tail or not elem.tail.strip()):
+            elem.tail = i
 
 
 # load currencies (ISO 4217)

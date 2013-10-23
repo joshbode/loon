@@ -12,7 +12,6 @@ __all__ = [
 ]
 
 
-from datetime import datetime
 from collections import OrderedDict
 from itertools import groupby
 from xml.etree import cElementTree as ElementTree
@@ -40,7 +39,7 @@ class Parser(object):
                 "Unable to parse response: {0}".format(e)
             )
 
-    def __new__(cls, response):
+    def __new__(cls, response, options=None):
         """Parse RAVEn(TM) XML API responses."""
 
         response = cls._parsexml(response)
@@ -286,15 +285,24 @@ class ScaleParser(Parser):
 
         return float(x) if x else 1.0
 
-    def __new__(cls, response):
+    def __new__(cls, response, options=None):
 
-        result = super(ScaleParser, cls).__new__(cls, response)
+        result = super(ScaleParser, cls).__new__(cls, response, options)
 
         divisor = ScaleParser._scalar(result.pop('Divisor'))
         multiplier = ScaleParser._scalar(result.pop('Multiplier'))
 
+        # pull the formatting hints
+        right = result.pop('DigitsRight')
+        left = result.pop('DigitsLeft') + right + 1
+        zero = '' if result.pop('SuppressLeadingZero') else '0'
+
         for number in cls.NUMBERS:
             result[number] *= multiplier / divisor
+            if options and options.get('use_formatting'):
+                result[number] = '{0:{zero}{left}.{right}f}'.format(
+                    result[number], zero=zero, left=left, right=right
+                ).lstrip()
 
         return result
 

@@ -15,13 +15,15 @@ import time
 import types
 import logging
 
-import serial
 from threading import Thread, Event
 from collections import deque
 from functools import partial
 
+import serial
+
 from .command import *
 from .parser import *
+from .node import Node
 from .exception import LoonError
 from formatter import SkipSignal
 
@@ -43,7 +45,7 @@ class LoonMeta(type):
         # add methods for commands to class
         for command in dict['COMMANDS']:
             def command_method(self, command=command, **args):
-                self._serial.write(command(self, **args))
+                self._serial.write(command(defaults=self.defaults, **args))
             command_method.__doc__ = command.__doc__
 
             setattr(obj, command.__name__, command_method)
@@ -67,7 +69,7 @@ class Loon(object):
     ]
 
     COMMANDS = [
-        initialize,  # command seems to not work
+        initialize,
         restart,
         factory_reset,
         get_connection_status,
@@ -93,18 +95,21 @@ class Loon(object):
         get_profile_data
     ]
 
-    def __init__(self, device, start_capture=True, queue=None):
+    def __init__(self, device, options=None, start_capture=True):
         """Initialise the Loon."""
 
         self._serial = serial.Serial(
-            device, baudrate=115200, bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE,
+            device, baudrate=115200,
+            bytesize=serial.EIGHTBITS,
+            parity=serial.PARITY_NONE,
+            stopbits=serial.STOPBITS_ONE,
             timeout=None
         )
 
         self._defaults = {}
+        self._options = Node(options if options else {})
 
-        self.responses = queue if queue else deque()
+        self.responses = deque()
 
         self._thread = None
         self._stop = Event()
@@ -121,6 +126,8 @@ class Loon(object):
     def start_capture(self):
 
         if not self.capturing:
+            self.initialize()
+
             self._stop.clear()
             self._thread = Thread(target=self._get_responses)
             self._thread.daemon = True
@@ -142,6 +149,12 @@ class Loon(object):
         else:
             del self._defaults[arg]
 
+    def options():
+        def fget(self):
+            return self._options.copy()
+        return locals()
+    options = property(**options())
+
     def defaults():
         def fget(self):
             return self._defaults.copy()
@@ -150,8 +163,7 @@ class Loon(object):
 
     def _get_responses(self):
 
-        #self.initialize()
-
+        start_found = False
         response = []
 
         while not self._stop.is_set():
@@ -159,8 +171,8 @@ class Loon(object):
             line = self._get_line()
 
             # look for truncated responses
-            split_line = line.split('<')
-            head, tail = '<'.join(split_line[:-1]), '<' + split_line[-1]
+            n = line.rfind('<')
+            head, tail = line[:n], line[n:]
 
             start = start_re.match(tail)
             end = end_re.match(head or tail)
@@ -173,37 +185,56 @@ class Loon(object):
                 response.append(line)
 
             if end:
+                if start_found:
 
-                # get the parser for the response-type
-                tag = end.group(1)
+                    # get the parser for the response-type
+                    tag = end.group(1)
 
-                try:
-                    parser = self.PARSERS[tag]
-                except KeyError as e:
-                    logging.warn("Unhandled response type: {0}".format(e))
-                    response = []
-                    continue
+                    try:
+                        parser = self.PARSERS[tag]
+                    except KeyError as e:
+                        logging.warn(
+                            "Unhandled response type: "
+                            "{0}: {1}".format(e, '\n'.join(response))
+                        )
+                        start_found = False
+                        response = []
+                        continue
 
-                # parse the response
-                try:
-                    response = parser(response)
-                except LoonError as e:
-                    logging.error("Invalid response data: {0}".format(e))
-                except SkipSignal as e:
-                    logging.debug("Skipped response: {0}: {1}".format(tag, e))
+                    try:
+                        response = parser(response, self.options)
+                    except LoonError as e:
+                        logging.error(
+                            "Invalid response data: "
+                            "{0}: {1!r}".format(e, '\n'.join(response))
+                        )
+                    except SkipSignal as e:
+                        logging.debug(
+                            "Skipped response: {0}: {1}".format(tag, e)
+                        )
+                    else:
+                        logging.debug(
+                            "Captured response: {0}".format(response)
+                        )
+                        self.responses.append(response)
+
                 else:
-                    logging.debug("Captured response: {0}".format(response))
-                    self.responses.append(response)
-                finally:
-                    response = []
+                    logging.warn(
+                        "Discarding truncated response (missing start): "
+                        "{0!r}".format('\n'.join(response))
+                    )
 
+                start_found = False
+                response = []
+
+            # check this last in case there was a truncated end record
             if start:
                 if response:
                     logging.warn(
-                        "Discarding truncated response: {0!r}".format(
-                            '\n'.join(response)
-                        )
+                        "Discarding truncated response (missing end): "
+                        "{0!r}".format('\n'.join(response))
                     )
+                start_found = True
                 response = [tail]
 
     def __del__(self):

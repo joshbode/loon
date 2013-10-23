@@ -40,7 +40,7 @@ class Command(object):
 
     ARGS = []
 
-    def __new__(cls, loon=None, **args):
+    def __new__(cls, defaults=None, **args):
         """Generate XML API command."""
 
         command = ElementTree.Element('Command')
@@ -51,13 +51,11 @@ class Command(object):
         args = {k.lower(): v for k, v in args.items()}
 
         # add in default arguments
-        if loon:
-            defaults = loon.defaults
-            if defaults:
-                args = args.update((
-                    (k, v) for k, v in defaults.items()
-                    if k.lower() not in args
-                ))
+        if defaults:
+            args = args.update((
+                (k, v) for k, v in defaults.items()
+                if k.lower() not in args
+            ))
 
         # process and format arguements
         for formatter in reversed(cls.ARGS):
@@ -74,6 +72,7 @@ class Command(object):
                 ))
 
         command.insert(0, name)
+        indent(command)
 
         return ElementTree.tostring(command)
 
@@ -86,7 +85,12 @@ class initialize(Command):
     speed up the initial connection.
     """
 
-    pass
+    def __new__(cls, defaults=None, **args):
+        """Generate XML API command."""
+
+        # according to Rainforest, the initialize command is not implemented
+        # however, this is equivalent :)
+        return '>>>>>>\n'
 
 
 class restart(Command):

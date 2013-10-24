@@ -88,22 +88,30 @@ class Node(MutableMapping):
     def __iter__(self):
         """Return an iterator over the keys in the node tree."""
 
-        return ((key,) + sub_key
-                for key, value in self.data.items()
-                for sub_key in (value if isinstance(value, Node) else ((),)))
+        return (
+            (key, ) + sub_key
+            for key, value in self.data.items()
+            for sub_key in (
+                value if isinstance(value, Node) else ((), )
+            )
+        )
 
     def __len__(self):
         """Return the number of values in the node tree."""
 
-        return sum(len(value) if isinstance(value, Node) else 1
-                   for key, value in self.data.items())
+        return sum(
+            len(value) if isinstance(value, Node) else 1
+            for key, value in self.data.items()
+        )
 
     def __repr__(self):
         """String representation of the node tree."""
 
-        items = ', '.join("%s: %s" % (repr(key), repr(value))
-                          for key, value in self.items())
-        return 'Node({%s})' % items
+        items = ', '.join(
+            "{0}: {1}".format(repr(key), repr(value))
+            for key, value in self.items()
+        )
+        return 'Node({{0}})'.format(items)
 
     def __str__(self):
         """String representation of the node tree."""

@@ -10,6 +10,7 @@ Loon main class.
 
 __all__ = ['Loon']
 
+import os
 import re
 import time
 import types
@@ -20,6 +21,8 @@ from collections import deque
 from functools import partial
 
 import serial
+from serial.tools.list_ports import comports
+import yaml
 
 from .command import *
 from .parser import *
@@ -59,6 +62,7 @@ class Loon(object):
 
     __metaclass__ = LoonMeta
 
+    # parser classes for responses
     PARSERS = [
         ConnectionStatus, DeviceInfo, ScheduleInfo,
         MeterList, MeterInfo, NetworkInfo,
@@ -68,6 +72,7 @@ class Loon(object):
         ProfileData, Warning,
     ]
 
+    # XML API commands
     COMMANDS = [
         initialize,
         restart,
@@ -95,19 +100,25 @@ class Loon(object):
         get_profile_data
     ]
 
-    def __init__(self, device, options=None, start_capture=True):
+    def __init__(self, device=None, start_capture=True,
+                 defaults=None, options=None):
         """Initialise the Loon."""
 
-        self._serial = serial.Serial(
-            device, baudrate=115200,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            timeout=None
-        )
+        self._options = Node({
+            'device': None,
+            'defaults.use_formatting': True
+        })
+        if options:
+            self._options.update(options)
 
-        self._defaults = {}
-        self._options = Node(options if options else {})
+        if not device:
+            device = self._options.device or self._detect_device()
+
+        self._serial = serial.Serial(device, baudrate=115200)
+
+        self._defaults = self._options.defaults
+        if defaults:
+            self._defaults.update(defaults)
 
         self.responses = deque()
 
@@ -117,13 +128,35 @@ class Loon(object):
         if start_capture:
             self.start_capture()
 
+    def _detect_device(self):
+        """Guess RAVEn device name."""
+
+        devices = comports()
+
+        # TODO windows and improved linux detection by hwid
+        if os.name == 'posix':
+            pattern = re.compile(r'/dev/tty\.(usbserial|raven)')
+            devices = [x[0] for x in devices if pattern.match(x[0])]
+
+        if len(devices) == 1:
+            return devices[0]
+        elif not devices:
+            raise LoonError("Unable to determine serial device name.")
+        elif len(devices) > 1:
+            raise LoonError(
+                "Unable to determine unique serial device name: "
+                "{0}".format(', '.join(devices))
+            )
+
     def _get_line(self):
+        """Get a line of data."""
 
         line = self._serial.readline()
 
         return line.lstrip('\0').rstrip()
 
     def start_capture(self):
+        """Start capturing data in background."""
 
         if not self.capturing:
             self.initialize()
@@ -134,15 +167,18 @@ class Loon(object):
             self._thread.start()
 
     def stop_capture(self):
+        """Stop capturing data in background."""
 
         self._stop.set()
 
     @property
     def capturing(self):
+        """Return True if background capturing thread is active."""
 
         return self._thread and self._thread.is_alive()
 
     def set_default(self, arg, value=None):
+        """Set default arguments."""
 
         if value is not None:
             self._defaults[arg] = value
@@ -162,6 +198,7 @@ class Loon(object):
     defaults = property(**defaults())
 
     def _get_responses(self):
+        """Main background process to capture and process data."""
 
         start_found = False
         response = []
@@ -195,7 +232,9 @@ class Loon(object):
                     except KeyError as e:
                         logging.warn(
                             "Unhandled response type: "
-                            "{0}: {1}".format(e, '\n'.join(response))
+                            "{0}: {1}: {2}".format(
+                                tag, e, '\n'.join(response)
+                            )
                         )
                         start_found = False
                         response = []
@@ -206,7 +245,9 @@ class Loon(object):
                     except LoonError as e:
                         logging.error(
                             "Invalid response data: "
-                            "{0}: {1!r}".format(e, '\n'.join(response))
+                            "{0}: {1}: {2!r}".format(
+                                tag, e, '\n'.join(response)
+                            )
                         )
                     except SkipSignal as e:
                         logging.debug(
@@ -214,7 +255,7 @@ class Loon(object):
                         )
                     else:
                         logging.debug(
-                            "Captured response: {0}".format(response)
+                            "Captured response: {0}: {1}".format(tag, response)
                         )
                         self.responses.append(response)
 
@@ -234,6 +275,7 @@ class Loon(object):
                         "Discarding truncated response (missing end): "
                         "{0!r}".format('\n'.join(response))
                     )
+
                 start_found = True
                 response = [tail]
 

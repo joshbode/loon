@@ -27,11 +27,13 @@ __all__ = [
     'close_current_period',
     'set_fast_poll',
     'get_profile_data',
+    'image_block_dump',
 ]
 
 from xml.etree import cElementTree as ElementTree
 
 from .formatter import *
+from .formatter import indent
 from .exception import LoonError
 
 
@@ -373,4 +375,17 @@ class get_profile_data(Command):
         Hex('NumberOfPeriods', required=True, range=(0, 12)),
         Date('EndTime', required=True),
         IntervalChannel('IntervalChannel', required=True),
+    ]
+
+
+# undocumented stuff - discovered in the strings of SpiderMite :)
+class image_block_dump(Command):
+    """
+    Send the IMAGE_BLOCK_DUMP command to the the RAVEn(TM) to extract a sized
+    block of the firmware image at the offest specified.
+    """
+
+    ARGS = [
+        Hex('Offset', required=True, range=(0, 0xffffffff)),
+        Hex('BlkSize', required=True, range=(0, 0x40)),
     ]

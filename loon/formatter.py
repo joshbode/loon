@@ -4,10 +4,10 @@ RAVEn(TM) API data formats.
 
 __all__ = [
     'Formatter', 'SkipSignal',
-    'String', 'Integer', 'Decimal', 'Hex', 'Date', 'Currency', 'Enumeration',
+    'String', 'Base64String',
+    'Integer', 'Decimal', 'Hex', 'Date', 'Currency', 'Enumeration',
     'Event', 'Status', 'Boolean', 'MeterType', 'Queue',
     'IntervalChannel', 'IntervalPeriod',
-    'indent',
 ]
 
 import os.path
@@ -137,6 +137,21 @@ class String(Formatter):
     """String format."""
 
     pass
+
+
+class Base64String(Formatter):
+    """Base64 encoded string."""
+
+    @classmethod
+    def encode(cls, obj):
+        """Convert object to XML API format."""
+
+        return str(obj).encode('base64')
+
+    def _parse(self, value):
+        """Convert XML API value to object."""
+
+        return value.decode('base64')
 
 
 class Integer(Formatter):

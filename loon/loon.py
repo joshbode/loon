@@ -3,7 +3,9 @@ Loon main class.
 """
 
 # TODO
-# - Clear line buffer if new tag starts in middle of existing message
+# - defaults need to (potentially) be converted
+# - capture a response to command (blocking)
+#   - repeat until a response received!
 # - testing
 # - alternative results stores
 # - client/server
@@ -69,7 +71,8 @@ class Loon(object):
         TimeCluster, MessageCluster, PriceCluster,
         InstantaneousDemand, CurrentSummationDelivered,
         CurrentPeriodUsage, LastPeriodUsage,
-        ProfileData, Warning,
+        ProfileData, Warning, Error,
+        Firmware,
     ]
 
     # XML API commands
@@ -97,30 +100,28 @@ class Loon(object):
         get_last_period_usage,
         close_current_period,
         set_fast_poll,
-        get_profile_data
+        get_profile_data,
+        image_block_dump,
     ]
 
     def __init__(self, device=None, start_capture=True,
-                 defaults=None, options=None):
+                 options=None, defaults=None):
         """Initialise the Loon."""
 
         self._options = Node({
-            'device': None,
-            'defaults.use_formatting': True
+            'use_formatting': True
         })
         if options:
             self._options.update(options)
 
-        if not device:
-            device = self._options.device or self._detect_device()
-
-        self._serial = serial.Serial(device, baudrate=115200)
-
-        self._defaults = self._options.defaults
-        if defaults:
-            self._defaults.update(defaults)
+        self._defaults = defaults if defaults else {}
 
         self.responses = deque()
+
+        if not device:
+            device = self._detect_device()
+
+        self._serial = serial.Serial(device, baudrate=115200)
 
         self._thread = None
         self._stop = Event()
@@ -128,15 +129,35 @@ class Loon(object):
         if start_capture:
             self.start_capture()
 
+    @classmethod
+    def from_config(cls, config, start_capture=True):
+
+        if isinstance(config, basestring):
+            config = open(config, 'r')
+
+        if isinstance(config, file):
+            config = yaml.load(config)
+
+        return cls(
+            options=config.get('options'),
+            defaults=config.get('defaults'),
+            start_capture=True
+        )
+
     def _detect_device(self):
         """Guess RAVEn device name."""
 
         devices = comports()
 
-        # TODO windows and improved linux detection by hwid
+        # TODO improved linux detection by hwid
         if os.name == 'posix':
             pattern = re.compile(r'/dev/tty\.(usbserial|raven)')
-            devices = [x[0] for x in devices if pattern.match(x[0])]
+        elif os.name == 'nt':
+            pattern = re.compile(r'FTDIBUS\\\\VID_0403\+PID_8A28')
+        else:
+            raise LoonError("Unable to detect device on this platform.")
+
+        devices = [dev for dev, desc, hwid in devices if pattern.match(hwid)]
 
         if len(devices) == 1:
             return devices[0]

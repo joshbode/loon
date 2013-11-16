@@ -9,6 +9,7 @@ __all__ = [
     'InstantaneousDemand', 'CurrentSummationDelivered',
     'CurrentPeriodUsage', 'LastPeriodUsage',
     'ProfileData', 'Warning', 'Error',
+    'Firmware'
 ]
 
 
@@ -421,4 +422,20 @@ class ProfileData(Parser):
         Hex('IntervalData',
             required=True, missing='0xffffff', sequence=True,
             range=(0, 0xffffff)),
+    ]
+
+
+# undocumented stuff - discovered in the strings of SpiderMite :)
+class Firmware(Parser):
+    """
+    The RAVEn (TM) sends the Firmware notification in response to the
+    IMAGE_BLOCK_DUMP command. It provides extracts of the firmware image for
+    the requested offset with length of the requested block size.
+    """
+
+    TAGS = [
+        String('Name', required=True),
+        Hex('Offset', required=True, range=(0, 0xffffffff)),
+        Hex('BlkSize', required=True, range=(0, 0x40)),
+        Base64String('Blk', required=True),
     ]
